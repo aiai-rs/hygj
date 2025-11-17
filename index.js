@@ -6,7 +6,7 @@ const sharp = require('sharp');
 const fs = require('fs-extra');
 const path = require('path');
 const fetch = require('node-fetch');
-const express = require('express'); // 新增
+const express = require('express');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 if (!BOT_TOKEN) {
@@ -23,7 +23,7 @@ fs.ensureDirSync(TEMP_DIR);
 // 支持格式
 const SUPPORTED_FORMATS = ['.xlsx', '.xls', '.xlsm', '.csv', '.pptx', '.pot', '.swf'];
 
-// 处理文件消息（保持原样）
+// 处理文件消息
 bot.on('document', async (ctx) => {
   const file = ctx.message.document;
   if (!file) return;
@@ -32,6 +32,8 @@ bot.on('document', async (ctx) => {
   if (!SUPPORTED_FORMATS.includes(ext)) {
     return ctx.reply('不支持的格式。只支持: xlsx, xls, xlsm, csv, pptx, pot, swf');
   }
+
+  ctx.reply('处理中...'); // 加进度提示
 
   try {
     // 下载文件
@@ -68,7 +70,7 @@ bot.on('document', async (ctx) => {
   }
 });
 
-// Excel/CSV 转换为图片（保持原样，包括 generateTableHtml）
+// Excel/CSV 转换为图片
 async function convertSpreadsheetToImages(filePath) {
   let workbook;
   if (path.extname(filePath) === '.csv') {
@@ -92,7 +94,7 @@ async function convertSpreadsheetToImages(filePath) {
 }
 
 function generateTableHtml(ws) {
-  const htmlTable = xlsx.utils.sheet_to_html(ws); // 优化：用内置函数，更准确
+  const htmlTable = xlsx.utils.sheet_to_html(ws);
   return `
     <html>
       <head>
@@ -107,10 +109,10 @@ function generateTableHtml(ws) {
     </html>`;
 }
 
-// PPTX转换为图片（保持）
+// PPTX转换为图片
 async function convertPptxToImages(filePath) {
   const images = [];
-  const browser = await puppeteer.launch({ headless: true });
+  const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] }); // Render 兼容
   const page = await browser.newPage();
   const text = 'PPTX预览（简化模式）';
   await page.setContent(`<div style="font-size:24px;padding:20px;">${text}</div>`);
@@ -121,10 +123,10 @@ async function convertPptxToImages(filePath) {
   return images;
 }
 
-// SWF转换为图片（保持）
+// SWF转换为图片
 async function convertSwfToImages(filePath) {
   const images = [];
-  const browser = await puppeteer.launch({ headless: true });
+  const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
   const page = await browser.newPage();
   const html = `<html><body><embed src="file://${filePath}" type="application/x-shockwave-flash" width="800" height="600"></body></html>`;
   await page.setContent(html, { waitUntil: 'networkidle0' });
@@ -135,9 +137,9 @@ async function convertSwfToImages(filePath) {
   return images;
 }
 
-// HTML渲染为图片（保持）
+// HTML渲染为图片
 async function renderHtmlToImage(html, outputPath) {
-  const browser = await puppeteer.launch({ headless: true });
+  const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] }); // Render 安全
   const page = await browser.newPage();
   await page.setContent(html);
   await page.screenshot({ path: outputPath, fullPage: true });
@@ -145,27 +147,29 @@ async function renderHtmlToImage(html, outputPath) {
   await sharp(outputPath).png().toFile(outputPath);
 }
 
-// 清理临时文件（保持）
+// 清理临时文件
 function cleanupTemp() {
   fs.emptyDirSync(TEMP_DIR);
 }
 
-// 启动Bot（保持）
-bot.launch().then(() => {
-  console.log('Bot started!');
-  cleanupTemp();
-}).catch(err => {
-  console.error(err);
-  cleanupTemp();
-  process.exit(1);
-});
-
-// 新增：Express 服务器监听端口（绕过 Render 端口检查）
+// Express 服务器
 const app = express();
+app.use(bot.webhookCallback('/bot')); // Webhook 端点
+
 const PORT = process.env.PORT || 10000;
 app.get('/', (req, res) => res.send('Bot is running!'));
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`Web server listening on port ${PORT}`);
+  
+  // 设置 Webhook（用 Render URL）
+  const WEBHOOK_URL = process.env.RENDER_URL || 'https://hygj.onrender.com'; // 你的服务 URL
+  const WEBHOOK_PATH = `/bot${BOT_TOKEN}`; // 安全路径
+  await bot.telegram.setWebhook(`${WEBHOOK_URL}${WEBHOOK_PATH}`);
+  console.log(`Webhook set to ${WEBHOOK_URL}${WEBHOOK_PATH}`);
+  
+  // 启动 Bot（webhook 模式）
+  await bot.launch();
+  console.log('Bot started with webhook!');
 });
 
 // 优雅关闭
