@@ -7,7 +7,7 @@ const puppeteer = require('puppeteer');
 const sharp = require('sharp');
 const fs = require('fs-extra');
 const path = require('path');
-const fetch = require('node-fetch'); // 保留，但用 arrayBuffer
+const fetch = require('node-fetch');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 if (!BOT_TOKEN) {
@@ -44,7 +44,7 @@ bot.on('document', async (ctx) => {
     const fileUrl = await ctx.telegram.getFileLink(file.file_id);
     const filePath = path.join(TEMP_DIR, `input${ext}`);
     const response = await fetch(fileUrl);
-    await fs.writeFile(filePath, Buffer.from(await response.arrayBuffer())); // 修复：用 arrayBuffer
+    await fs.writeFile(filePath, Buffer.from(await response.arrayBuffer()));
 
     let images = [];
     if (['.xlsx', '.xls', '.xlsm', '.csv'].includes(ext)) {
@@ -52,7 +52,7 @@ bot.on('document', async (ctx) => {
     } else if (['.pptx', '.pot'].includes(ext)) {
       images = await convertPptxToImages(filePath);
     } else if (ext === '.swf') {
-      images = await convertSwfToImages(filePath); // 注意：SWF 可能失败
+      images = await convertSwfToImages(filePath);
     }
 
     // 发送图片
@@ -74,7 +74,7 @@ bot.on('document', async (ctx) => {
 async function convertSpreadsheetToImages(filePath) {
   let workbook;
   if (path.extname(filePath) === '.csv') {
-    workbook = xlsx.readFile(filePath, { type: 'string' }); // 修复：用 xlsx 原生解析 CSV
+    workbook = xlsx.readFile(filePath, { type: 'string' });
   } else {
     workbook = xlsx.readFile(filePath);
   }
@@ -105,34 +105,34 @@ function generateTableHtml(ws) {
     </html>`;
 }
 
-// PPTX 转图片（简化示例；实际需扩展解析文件）
+// PPTX 转图片
 async function convertPptxToImages(filePath) {
   const images = [];
   const pptx = new PptxGenJS();
   const slide = pptx.addSlide();
   slide.addText('PPTX 内容预览（简化：实际需加载你的 PPTX 文件）', { x: 1, y: 1, color: '363636' });
   const imgPath = path.join(TEMP_DIR, 'slide1.png');
-  await pptx.write('png', { output: imgPath }); // 修复：用 pptxgenjs 输出 PNG
+  await pptx.write('png', { output: imgPath });
   images.push(imgPath);
   return images;
 }
 
-// SWF 转图片（警告：Flash 已弃用，可能空白）
+// SWF 转图片
 async function convertSwfToImages(filePath) {
   const images = [];
-  const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+  const browser = await launchPuppeteer(); // 用共享 launch 函数
   const page = await browser.newPage();
   await page.setContent(`<div style="font-size:24px;padding:20px;">SWF 不支持（Flash 已弃用），请用其他格式。</div>`);
   const imgPath = path.join(TEMP_DIR, 'swf_frame.png');
   await page.screenshot({ path: imgPath, fullPage: true });
-  images.push(imgPath);
   await browser.close();
+  images.push(imgPath);
   return images;
 }
 
-// HTML 转图片
+// HTML 转图片（核心：配置 Puppeteer）
 async function renderHtmlToImage(html, outputPath) {
-  const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+  const browser = await launchPuppeteer();
   const page = await browser.newPage();
   await page.setContent(html, { waitUntil: 'networkidle0' });
   await page.screenshot({ path: outputPath, fullPage: true });
@@ -144,21 +144,30 @@ async function renderHtmlToImage(html, outputPath) {
   fs.renameSync(tmpPath, outputPath);
 }
 
+// 共享 Puppeteer launch（Render 配置）
+async function launchPuppeteer() {
+  return puppeteer.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-accelerated-2d-canvas', '--no-first-run', '--no-zygote', '--disable-gpu'],
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(), // 动态路径
+    pipe: true
+  });
+}
+
 // 清理
 function cleanupTemp() {
   fs.emptyDirSync(TEMP_DIR);
 }
 
-// Webhook 设置：Express 统一服务器（核心修复：避免双服务器）
+// Webhook 设置
 const PORT = process.env.PORT || 3000;
-app.use(express.json()); // 添加：解析 JSON body
+app.use(express.json());
 app.use(bot.webhookCallback('/bot'));
 
-// 启动服务器并设置 Webhook
 app.listen(PORT, async () => {
   console.log(`Bot running on port ${PORT}`);
   const webhookUrl = process.env.RENDER_EXTERNAL_HOSTNAME 
-    ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}/bot`  // 修复：去掉 .onrender.com（Render 自动处理）
+    ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}/bot` 
     : `http://localhost:${PORT}/bot`;
   try {
     await bot.telegram.setWebhook(webhookUrl);
@@ -170,7 +179,7 @@ app.listen(PORT, async () => {
   cleanupTemp();
 });
 
-// 优雅关闭（保留）
+// 优雅关闭
 process.once('SIGINT', () => {
   bot.stop('SIGINT');
   cleanupTemp();
