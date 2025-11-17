@@ -6,8 +6,6 @@ const PptxGenJS = require('pptxgenjs');
 const puppeteer = require('puppeteer-core');
 const chromium = require('@sparticuz/chromium');
 const sharp = require('sharp');
-const fs = require('fs');
-const path = require('path');
 const fetch = require('node-fetch');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -19,34 +17,6 @@ if (!BOT_TOKEN) {
 const bot = new Telegraf(BOT_TOKEN);
 const app = express();
 
-// 临时目录（修复：用绝对 fallback，避免 __dirname 问题）
-let TEMP_DIR;
-try {
-  const safeDirname = typeof __dirname === 'string' ? __dirname : process.cwd();
-  console.log('Debug: safeDirname =', safeDirname);  // 日志1：检查 __dirname
-  TEMP_DIR = path.join(safeDirname, 'temp');
-  console.log('Debug: TEMP_DIR =', TEMP_DIR);  // 日志2：检查路径
-} catch (e) {
-  console.error('Debug: Path error, fallback to ./temp');
-  TEMP_DIR = './temp';
-}
-if (typeof TEMP_DIR !== 'string' || TEMP_DIR === '[object Object]') {
-  console.error('Debug: TEMP_DIR invalid, force ./temp');
-  TEMP_DIR = './temp';
-}
-console.log('Final TEMP_DIR:', TEMP_DIR);  // 日志3：最终路径
-
-// 创建目录
-try {
-  if (!fs.existsSync(TEMP_DIR)) {
-    fs.mkdirSync(TEMP_DIR, { recursive: true });
-    console.log('Debug: Created TEMP_DIR');
-  }
-} catch (e) {
-  console.error('Debug: mkdir error:', e.message);
-  process.exit(1);
-}
-
 // 支持格式
 const SUPPORTED_FORMATS = ['.xlsx', '.xls', '.xlsm', '.csv', '.pptx', '.pot', '.swf'];
 
@@ -55,7 +25,7 @@ bot.on('text', (ctx) => {
   ctx.reply('Bot 在线！请发送 xlsx, xls, xlsm, csv, pptx, pot, swf 文件转换图片。');
 });
 
-// 处理文件消息
+// 处理文件消息（全内存）
 bot.on('document', async (ctx) => {
   const file = ctx.message.document;
   if (!file) return;
@@ -65,56 +35,50 @@ bot.on('document', async (ctx) => {
   }
   ctx.reply('处理中...');
   try {
-    console.log('Debug: Starting file process, TEMP_DIR:', TEMP_DIR);  // 日志4
-    // 下载文件
+    // 下载到 Buffer
     const fileUrl = await ctx.telegram.getFileLink(file.file_id);
-    const filePath = path.join(TEMP_DIR, `input${ext}`);
-    console.log('Debug: filePath =', filePath);  // 日志5
     const response = await fetch(fileUrl);
-    await fs.promises.writeFile(filePath, Buffer.from(await response.arrayBuffer()));
-    console.log('Debug: File downloaded to', filePath);
+    const fileBuffer = Buffer.from(await response.arrayBuffer());
 
-    let images = [];
+    let imageBuffers = [];
     if (['.xlsx', '.xls', '.xlsm', '.csv'].includes(ext)) {
-      images = await convertSpreadsheetToImages(filePath);
+      imageBuffers = await convertSpreadsheetToBuffers(fileBuffer);
     } else if (['.pptx', '.pot'].includes(ext)) {
-      images = await convertPptxToImages(filePath);
+      imageBuffers = await convertPptxToBuffers(fileBuffer);
     } else if (ext === '.swf') {
-      images = await convertSwfToImages(filePath);
+      imageBuffers = await convertSwfToBuffers(fileBuffer);
     }
 
-    // 发送图片
-    for (const imgPath of images) {
-      await ctx.replyWithPhoto({ source: imgPath });
-      fs.unlinkSync(imgPath);
+    // 发送 Buffer 图片
+    for (const imgBuffer of imageBuffers) {
+      await ctx.replyWithPhoto({
+        source: imgBuffer,
+        filename: `converted${Date.now()}.png`
+      });
     }
-    fs.unlinkSync(filePath);
-    cleanupTemp();
-    ctx.reply(`转换完成！发送了 ${images.length} 张图片。无任何保存。`);
+    ctx.reply(`转换完成！发送了 ${imageBuffers.length} 张图片。无任何保存。`);
   } catch (error) {
     console.error('Error:', error.message);
     ctx.reply('转换失败: ' + error.message);
-    cleanupTemp();
   }
 });
 
-// Excel/CSV 转图片
-async function convertSpreadsheetToImages(filePath) {
+// Excel/CSV 转 Buffer 图片
+async function convertSpreadsheetToBuffers(fileBuffer) {
   let workbook;
-  if (path.extname(filePath) === '.csv') {
-    workbook = xlsx.readFile(filePath, { type: 'string' });
+  if (path.extname('dummy.csv') === '.csv') {  // 模拟 ext
+    workbook = xlsx.read(fileBuffer, { type: 'buffer' });
   } else {
-    workbook = xlsx.readFile(filePath);
+    workbook = xlsx.read(fileBuffer, { type: 'buffer' });
   }
-  const images = [];
+  const imageBuffers = [];
   for (const sheetName of workbook.SheetNames) {
     const ws = workbook.Sheets[sheetName];
     const html = generateTableHtml(ws);
-    const imgPath = path.join(TEMP_DIR, `${sheetName}.png`);
-    await renderHtmlToImage(html, imgPath);
-    images.push(imgPath);
+    const imgBuffer = await renderHtmlToBuffer(html);
+    imageBuffers.push(imgBuffer);
   }
-  return images;
+  return imageBuffers;
 }
 
 function generateTableHtml(ws) {
@@ -133,46 +97,37 @@ function generateTableHtml(ws) {
     </html>`;
 }
 
-// PPTX 转图片
-async function convertPptxToImages(filePath) {
-  const images = [];
+// PPTX 转 Buffer（简化）
+async function convertPptxToBuffers(fileBuffer) {
   const pptx = new PptxGenJS();
   const slide = pptx.addSlide();
-  slide.addText('PPTX 内容预览（简化：实际需加载你的 PPTX 文件）', { x: 1, y: 1, color: '363636' });
-  const imgPath = path.join(TEMP_DIR, 'slide1.png');
-  await pptx.write('png', { output: imgPath });
-  images.push(imgPath);
-  return images;
+  slide.addText('PPTX 内容预览（简化：实际需加载 Buffer）', { x: 1, y: 1, color: '363636' });
+  const buffer = await pptx.write('nodebuffer', { compression: false });
+  return [await sharp(buffer).png().toBuffer()];
 }
 
-// SWF 转图片
-async function convertSwfToImages(filePath) {
-  const images = [];
+// SWF 转 Buffer（提示）
+async function convertSwfToBuffers(fileBuffer) {
   const browser = await launchPuppeteer();
   const page = await browser.newPage();
   await page.setContent(`<div style="font-size:24px;padding:20px;">SWF 不支持（Flash 已弃用），请用其他格式。</div>`);
-  const imgPath = path.join(TEMP_DIR, 'swf_frame.png');
-  await page.screenshot({ path: imgPath, fullPage: true });
+  const buffer = await page.screenshot({ encoding: 'binary', fullPage: true });
   await browser.close();
-  images.push(imgPath);
-  return images;
+  return [await sharp(Buffer.from(buffer)).png().toBuffer()];
 }
 
-// HTML 转图片
-async function renderHtmlToImage(html, outputPath) {
+// HTML 转 Buffer
+async function renderHtmlToBuffer(html) {
   const browser = await launchPuppeteer();
   const page = await browser.newPage();
   await page.setContent(html, { waitUntil: 'networkidle0' });
-  await page.screenshot({ path: outputPath, fullPage: true });
+  const screenshotBuffer = await page.screenshot({ encoding: 'binary', fullPage: true });
   await browser.close();
-  // Sharp 优化
-  const tmpPath = outputPath + '.tmp';
-  await sharp(outputPath).png().toFile(tmpPath);
-  fs.unlinkSync(outputPath);
-  fs.renameSync(tmpPath, outputPath);
+  // Sharp 优化 Buffer
+  return sharp(screenshotBuffer).png().toBuffer();
 }
 
-// 共享 Puppeteer launch
+// Puppeteer launch
 async function launchPuppeteer() {
   return puppeteer.launch({
     headless: true,
@@ -185,19 +140,6 @@ async function launchPuppeteer() {
     }),
     pipe: true
   });
-}
-
-// 清理
-function cleanupTemp() {
-  try {
-    if (fs.existsSync(TEMP_DIR)) {
-      fs.rmSync(TEMP_DIR, { recursive: true, force: true });
-      console.log('Debug: Cleaned TEMP_DIR');  // 日志6
-    }
-    fs.mkdirSync(TEMP_DIR, { recursive: true });
-  } catch (e) {
-    console.error('Debug: Cleanup error:', e.message);
-  }
 }
 
 // Webhook 设置
@@ -217,17 +159,14 @@ app.listen(PORT, async () => {
     console.error('Failed to set webhook:', err.message);
     process.exit(1);
   }
-  cleanupTemp();
 });
 
 // 优雅关闭
 process.once('SIGINT', () => {
   bot.stop('SIGINT');
-  cleanupTemp();
   process.exit(0);
 });
 process.once('SIGTERM', () => {
   bot.stop('SIGTERM');
-  cleanupTemp();
   process.exit(0);
 });
