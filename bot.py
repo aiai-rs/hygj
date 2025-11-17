@@ -1,5 +1,6 @@
 import telebot
 import os
+from flask import Flask, request, abort
 from file_to_image import convert_file
 import tempfile
 
@@ -9,6 +10,7 @@ if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN 环境变量未设置！请在Render Dashboard中添加。")
 
 bot = telebot.TeleBot(BOT_TOKEN)
+app = Flask(__name__)  # Flask app，用于 webhook
 
 @bot.message_handler(commands=['start'])
 def start_message(message):
@@ -20,7 +22,7 @@ def handle_document(message):
         file_info = bot.get_file(message.document.file_id)
         downloaded_file = bot.download_file(file_info.file_path)
         
-        # 创建临时文件
+        # 创建临时文件（带后缀）
         suffix = os.path.splitext(message.document.file_name)[1] if message.document.file_name else ''
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
             temp_file.write(downloaded_file)
@@ -45,8 +47,27 @@ def handle_document(message):
         
     except Exception as e:
         bot.reply_to(message, f"错误: {str(e)}")
-        print(f"Bot错误: {e}")  # Render日志
+        print(f"Bot错误: {e}")  # Render 日志输出
 
+# Webhook 端点：接收 Telegram 更新
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return ''
+    else:
+        abort(403)
+
+# 启动 Flask app（Render 用 gunicorn 运行此文件）
 if __name__ == "__main__":
-    print("Bot启动中...")
-    bot.polling(none_stop=True)
+    # 本地测试：python bot.py
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
+    
+    # 注意：部署后，手动设置 webhook（见上方 curl 命令）
+    # 示例（本地或一次性脚本）：
+    # webhook_url = 'https://your-service.onrender.com/webhook'
+    # bot.remove_webhook()  # 移除旧 polling
+    # bot.set_webhook(url=webhook_url)
