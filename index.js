@@ -144,12 +144,21 @@ async function renderHtmlToImage(html, outputPath) {
   fs.renameSync(tmpPath, outputPath);
 }
 
-// 共享 Puppeteer launch（优化：用环境路径）
+// 共享 Puppeteer launch（修复：自动检测路径，不硬编码）
 async function launchPuppeteer() {
   return puppeteer.launch({
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-accelerated-2d-canvas', '--no-first-run', '--no-zygote', '--disable-gpu'],
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(),
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--no-first-run',
+      '--no-zygote',
+      '--disable-gpu',
+      '--single-process'  // 新增：Render 内存优化
+    ],
+    executablePath: undefined,  // 关键：让 Puppeteer 自动找（puppeteer.executablePath() 内部处理）
     pipe: true
   });
 }
