@@ -2,10 +2,8 @@ require('dotenv').config();
 const { Telegraf } = require('telegraf');
 const express = require('express');
 const xlsx = require('xlsx');
-const PptxGenJS = require('pptxgenjs');
 const puppeteer = require('puppeteer-core');
 const chromium = require('@sparticuz/chromium');
-const sharp = require('sharp');
 const path = require('path');
 const fetch = require('node-fetch');
 
@@ -31,6 +29,7 @@ bot.on('document', async (ctx) => {
   const file = ctx.message.document;
   if (!file) return;
   const ext = path.extname(file.file_name).toLowerCase();
+  console.log('Debug: Processing file ext:', ext);
   if (!SUPPORTED_FORMATS.includes(ext)) {
     return ctx.reply('不支持的格式。只支持: xlsx, xls, xlsm, csv, pptx, pot, swf');
   }
@@ -40,15 +39,18 @@ bot.on('document', async (ctx) => {
     const fileUrl = await ctx.telegram.getFileLink(file.file_id);
     const response = await fetch(fileUrl);
     const fileBuffer = Buffer.from(await response.arrayBuffer());
+    console.log('Debug: File buffer size:', fileBuffer.length);
 
     let imageBuffers = [];
     if (['.xlsx', '.xls', '.xlsm', '.csv'].includes(ext)) {
-      imageBuffers = await convertSpreadsheetToBuffers(fileBuffer, ext);
+      imageBuffers = await convertSpreadsheetToBuffers(fileBuffer);
     } else if (['.pptx', '.pot'].includes(ext)) {
-      imageBuffers = await convertPptxToBuffers(fileBuffer);
+      imageBuffers = await convertPptxToBuffers();
     } else if (ext === '.swf') {
-      imageBuffers = await convertSwfToBuffers(fileBuffer);
+      imageBuffers = await convertSwfToBuffers();
     }
+
+    console.log('Debug: Generated', imageBuffers.length, 'images');
 
     // 发送 Buffer 图片
     for (const imgBuffer of imageBuffers) {
@@ -65,7 +67,8 @@ bot.on('document', async (ctx) => {
 });
 
 // Excel/CSV 转 Buffer 图片
-async function convertSpreadsheetToBuffers(fileBuffer, ext) {
+async function convertSpreadsheetToBuffers(fileBuffer) {
+  console.log('Debug: Converting spreadsheet');
   let workbook = xlsx.read(fileBuffer, { type: 'buffer' });
   const imageBuffers = [];
   for (const sheetName of workbook.SheetNames) {
@@ -93,36 +96,32 @@ function generateTableHtml(ws) {
     </html>`;
 }
 
-// PPTX 转 Buffer
-async function convertPptxToBuffers(fileBuffer) {
-  const pptx = new PptxGenJS();
-  const slide = pptx.addSlide();
-  slide.addText('PPTX 内容预览（简化：实际需加载 Buffer）', { x: 1, y: 1, color: '363636' });
-  const buffer = await pptx.write('nodebuffer', { compression: false });
-  const pngBuffer = await sharp(buffer).png().toBuffer();  // 修复：用 toBuffer()，无 toFile
-  return [pngBuffer];
+// PPTX 转 Buffer（简化，用 Puppeteer 渲染文本）
+async function convertPptxToBuffers() {
+  console.log('Debug: Converting PPTX (simplified)');
+  const html = `<html><body style="font-size:24px;padding:20px;">PPTX 内容预览（简化模式）</body></html>`;
+  const imgBuffer = await renderHtmlToBuffer(html);
+  return [imgBuffer];
 }
 
-// SWF 转 Buffer
-async function convertSwfToBuffers(fileBuffer) {
-  const browser = await launchPuppeteer();
-  const page = await browser.newPage();
-  await page.setContent(`<div style="font-size:24px;padding:20px;">SWF 不支持（Flash 已弃用），请用其他格式。</div>`);
-  const buffer = await page.screenshot({ encoding: 'binary', fullPage: true });
-  await browser.close();
-  const pngBuffer = await sharp(Buffer.from(buffer)).png().toBuffer();  // 修复：用 toBuffer()
-  return [pngBuffer];
+// SWF 转 Buffer（提示，用 Puppeteer 渲染）
+async function convertSwfToBuffers() {
+  console.log('Debug: Converting SWF (prompt)');
+  const html = `<html><body style="font-size:24px;padding:20px;">SWF 不支持（Flash 已弃用），请用其他格式。</body></html>`;
+  const imgBuffer = await renderHtmlToBuffer(html);
+  return [imgBuffer];
 }
 
-// HTML 转 Buffer
+// HTML 转 Buffer（Puppeteer 截图 + Buffer 转换，无 Sharp）
 async function renderHtmlToBuffer(html) {
+  console.log('Debug: Rendering HTML to buffer');
   const browser = await launchPuppeteer();
   const page = await browser.newPage();
   await page.setContent(html, { waitUntil: 'networkidle0' });
-  const screenshotBuffer = await page.screenshot({ encoding: 'binary', fullPage: true });
+  const screenshotBinary = await page.screenshot({ encoding: 'binary', fullPage: true });
   await browser.close();
-  const pngBuffer = await sharp(screenshotBuffer).png().toBuffer();  // 修复：用 toBuffer()
-  return pngBuffer;
+  // 直接转 Buffer（PNG 默认）
+  return Buffer.from(screenshotBinary, 'binary');
 }
 
 // Puppeteer launch
