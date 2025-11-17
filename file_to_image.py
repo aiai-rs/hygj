@@ -83,16 +83,18 @@ def ppt_to_image(file_path, output_dir):
     return output_dir
 
 def swf_to_image(file_path, output_dir):
-    """swf -> PNG (需swftools，Render build时安装)"""
-    os.makedirs(output_dir, exist_ok=True)
-    try:
-        base = os.path.splitext(os.path.basename(file_path))[0]
-        cmd = f"pdf2png -s {output_dir}/{base} {file_path}"
-        os.system(cmd)  # 输出多帧PNG
-        return output_dir
-    except Exception as e:
-        print(f"SWF转换错误: {e} (确保swftools安装)")
-        return None
+    """swf -> PNG (Render free tier不支持，临时跳过)"""
+    # os.makedirs(output_dir, exist_ok=True)
+    # try:
+    #     base = os.path.splitext(os.path.basename(file_path))[0]
+    #     cmd = f"pdf2png -s {output_dir}/{base} {file_path}"
+    #     os.system(cmd)  # 输出多帧PNG
+    #     return output_dir
+    # except Exception as e:
+    #     print(f"SWF转换错误: {e}")
+    #     return None
+    print("SWF 支持暂不可用")  # 临时日志
+    return None  # 跳过，返回空
 
 def convert_file(file_path):
     """主转换函数：返回图片路径列表"""
@@ -110,5 +112,4 @@ def convert_file(file_path):
         
         if output_dir and os.path.exists(output_dir):
             images = [os.path.join(output_dir, f) for f in os.listdir(output_dir) if f.endswith('.png')]
-            # 复制到持久位置（Render临时dir会删，但这里返回路径，bot会立即发送）
     return images
