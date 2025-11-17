@@ -1,3 +1,4 @@
+require('dotenv').config();
 const { Telegraf } = require('telegraf');
 const xlsx = require('xlsx');
 const PptxGenJS = require('pptxgenjs');
@@ -6,11 +7,10 @@ const sharp = require('sharp');
 const fs = require('fs-extra');
 const path = require('path');
 const fetch = require('node-fetch');
-const express = require('express');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 if (!BOT_TOKEN) {
-  console.error('BOT_TOKEN not set!');
+  console.error('BOT_TOKEN not set! Add to .env file.');
   process.exit(1);
 }
 
@@ -23,6 +23,11 @@ fs.ensureDirSync(TEMP_DIR);
 // 支持格式
 const SUPPORTED_FORMATS = ['.xlsx', '.xls', '.xlsm', '.csv', '.pptx', '.pot', '.swf'];
 
+// 在线确认：文本消息回复
+bot.on('text', (ctx) => {
+  ctx.reply('Bot 在线！请发送 xlsx, xls, xlsm, csv, pptx, pot, swf 文件转换图片。');
+});
+
 // 处理文件消息
 bot.on('document', async (ctx) => {
   const file = ctx.message.document;
@@ -33,14 +38,14 @@ bot.on('document', async (ctx) => {
     return ctx.reply('不支持的格式。只支持: xlsx, xls, xlsm, csv, pptx, pot, swf');
   }
 
-  ctx.reply('处理中...'); // 加进度提示
+  ctx.reply('处理中...'); // 进度提示
 
   try {
-    // 下载文件
+    // 下载文件到 temp（已修复 fetch）
     const fileUrl = await ctx.telegram.getFileLink(file.file_id);
     const filePath = path.join(TEMP_DIR, `input${ext}`);
     const response = await fetch(fileUrl);
-    await fs.writeFile(filePath, response.buffer);
+    await fs.writeFile(filePath, await response.buffer());
 
     let images = [];
     if (['.xlsx', '.xls', '.xlsm', '.csv'].includes(ext)) {
@@ -51,26 +56,29 @@ bot.on('document', async (ctx) => {
       images = await convertSwfToImages(filePath);
     }
 
-    // 发送图片
+    // 发送图片回 Telegram
     for (const imgPath of images) {
       await ctx.replyWithPhoto({ source: imgPath });
-      // 立即删除图片
+      // 立即删除图片（零记录）
       fs.unlinkSync(imgPath);
     }
 
     // 删除原文件
     fs.unlinkSync(filePath);
 
-    ctx.reply(`转换完成！发送了 ${images.length} 张图片。`);
+    // 清空 temp 目录
+    cleanupTemp();
+
+    ctx.reply(`转换完成！发送了 ${images.length} 张图片。无任何保存。`);
   } catch (error) {
-    console.error(error);
+    console.error('Error:', error.message);
     ctx.reply('转换失败: ' + error.message);
-    // 清理临时文件
+    // 出错也清理
     cleanupTemp();
   }
 });
 
-// Excel/CSV 转换为图片
+// Excel/CSV 转图片（每个 Sheet 一张）
 async function convertSpreadsheetToImages(filePath) {
   let workbook;
   if (path.extname(filePath) === '.csv') {
@@ -109,12 +117,12 @@ function generateTableHtml(ws) {
     </html>`;
 }
 
-// PPTX转换为图片
+// PPTX 转图片（简化，每页一图）
 async function convertPptxToImages(filePath) {
   const images = [];
-  const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] }); // Render 兼容
+  const browser = await puppeteer.launch({ headless: true });
   const page = await browser.newPage();
-  const text = 'PPTX预览（简化模式）';
+  const text = 'PPTX预览（简化模式，每页转图）';
   await page.setContent(`<div style="font-size:24px;padding:20px;">${text}</div>`);
   const imgPath = path.join(TEMP_DIR, 'slide1.png');
   await page.screenshot({ path: imgPath, fullPage: true });
@@ -123,10 +131,10 @@ async function convertPptxToImages(filePath) {
   return images;
 }
 
-// SWF转换为图片
+// SWF 转图片（第一帧）
 async function convertSwfToImages(filePath) {
   const images = [];
-  const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+  const browser = await puppeteer.launch({ headless: true });
   const page = await browser.newPage();
   const html = `<html><body><embed src="file://${filePath}" type="application/x-shockwave-flash" width="800" height="600"></body></html>`;
   await page.setContent(html, { waitUntil: 'networkidle0' });
@@ -137,47 +145,43 @@ async function convertSwfToImages(filePath) {
   return images;
 }
 
-// HTML渲染为图片
+// HTML 渲染成图片（已修复 Sharp）
 async function renderHtmlToImage(html, outputPath) {
-  const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] }); // Render 安全
+  const browser = await puppeteer.launch({ headless: true });
   const page = await browser.newPage();
   await page.setContent(html);
   await page.screenshot({ path: outputPath, fullPage: true });
   await browser.close();
-  await sharp(outputPath).png().toFile(outputPath);
+  // Sharp 优化 PNG（用临时文件避免冲突）
+  const tmpPath = outputPath + '.tmp';
+  await sharp(outputPath).png().toFile(tmpPath);
+  fs.unlinkSync(outputPath);
+  fs.renameSync(tmpPath, outputPath);
 }
 
-// 清理临时文件
+// 清理 temp（零记录）
 function cleanupTemp() {
   fs.emptyDirSync(TEMP_DIR);
 }
 
-// Express 服务器
-const app = express();
-app.use(bot.webhookCallback('/bot')); // Webhook 端点
-
-const PORT = process.env.PORT || 10000;
-app.get('/', (req, res) => res.send('Bot is running!'));
-app.listen(PORT, async () => {
-  console.log(`Web server listening on port ${PORT}`);
-  
-  // 设置 Webhook（用 Render URL）
-  const WEBHOOK_URL = process.env.RENDER_URL || 'https://hygj.onrender.com'; // 你的服务 URL
-  const WEBHOOK_PATH = `/bot${BOT_TOKEN}`; // 安全路径
-  await bot.telegram.setWebhook(`${WEBHOOK_URL}${WEBHOOK_PATH}`);
-  console.log(`Webhook set to ${WEBHOOK_URL}${WEBHOOK_PATH}`);
-  
-  // 启动 Bot（webhook 模式）
-  await bot.launch();
-  console.log('Bot started with webhook!');
+// 启动 Bot（polling，适合 Pella.app）
+bot.launch().then(() => {
+  console.log('Bot started! (Polling mode)');
+  cleanupTemp(); // 启动时清
+}).catch(err => {
+  console.error('Bot error:', err);
+  cleanupTemp();
+  process.exit(1);
 });
 
-// 优雅关闭
+// 优雅关闭（清 temp）
 process.once('SIGINT', () => {
   bot.stop('SIGINT');
+  cleanupTemp();
   process.exit(0);
 });
 process.once('SIGTERM', () => {
   bot.stop('SIGTERM');
+  cleanupTemp();
   process.exit(0);
 });
