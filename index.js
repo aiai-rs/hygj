@@ -3,10 +3,10 @@ const { Telegraf } = require('telegraf');
 const express = require('express');
 const xlsx = require('xlsx');
 const PptxGenJS = require('pptxgenjs');
-const puppeteer = require('puppeteer-core'); // 改：用 core
-const chromium = require('@sparticuz/chromium'); // 新增：Chromium 提供者
+const puppeteer = require('puppeteer-core');
+const chromium = require('@sparticuz/chromium');
 const sharp = require('sharp');
-const fs = require('fs-extra');
+const fs = require('fs');
 const path = require('path');
 const fetch = require('node-fetch');
 
@@ -19,9 +19,16 @@ if (!BOT_TOKEN) {
 const bot = new Telegraf(BOT_TOKEN);
 const app = express();
 
-// 临时目录
-const TEMP_DIR = path.join(__dirname, 'temp');
-fs.ensureDirSync(TEMP_DIR);
+// 临时目录（修复：用相对路径，避免 __dirname 对象问题）
+const TEMP_DIR = './temp';
+if (typeof TEMP_DIR !== 'string') {
+  console.error('TEMP_DIR is not a string:', TEMP_DIR);
+  process.exit(1);
+}
+// 创建目录（用 Node 内置，递归）
+if (!fs.existsSync(TEMP_DIR)) {
+  fs.mkdirSync(TEMP_DIR, { recursive: true });
+}
 
 // 支持格式
 const SUPPORTED_FORMATS = ['.xlsx', '.xls', '.xlsm', '.csv', '.pptx', '.pot', '.swf'];
@@ -45,7 +52,7 @@ bot.on('document', async (ctx) => {
     const fileUrl = await ctx.telegram.getFileLink(file.file_id);
     const filePath = path.join(TEMP_DIR, `input${ext}`);
     const response = await fetch(fileUrl);
-    await fs.writeFile(filePath, Buffer.from(await response.arrayBuffer()));
+    await fs.promises.writeFile(filePath, Buffer.from(await response.arrayBuffer()));
 
     let images = [];
     if (['.xlsx', '.xls', '.xlsm', '.csv'].includes(ext)) {
@@ -145,24 +152,27 @@ async function renderHtmlToImage(html, outputPath) {
   fs.renameSync(tmpPath, outputPath);
 }
 
-// 共享 Puppeteer launch（核心修复：用 @sparticuz/chromium 自动路径）
+// 共享 Puppeteer launch
 async function launchPuppeteer() {
   return puppeteer.launch({
     headless: true,
-    args: chromium.args,  // 新增：用 chromium 的优化 args
+    args: chromium.args,
     defaultViewport: chromium.defaultViewport,
-    executablePath: await chromium.executablePath({  // 关键：动态获取 Chromium 路径
+    executablePath: await chromium.executablePath({
       args: chromium.args,
       fallbackToSystem: true,
-      emulator: true  // Render 模拟环境
+      emulator: true
     }),
     pipe: true
   });
 }
 
-// 清理
+// 清理（修复：用 Node 内置 rmdirSync + rmSync）
 function cleanupTemp() {
-  fs.emptyDirSync(TEMP_DIR);
+  if (fs.existsSync(TEMP_DIR)) {
+    fs.rmSync(TEMP_DIR, { recursive: true, force: true });
+  }
+  fs.mkdirSync(TEMP_DIR, { recursive: true });
 }
 
 // Webhook 设置
