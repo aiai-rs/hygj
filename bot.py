@@ -14,7 +14,11 @@ app = Flask(__name__)  # Flask app，用于 webhook
 
 @bot.message_handler(commands=['start'])
 def start_message(message):
-    bot.reply_to(message, "上传文件（xlsx/csv/pptx/swf），我帮你转成图片！")
+    bot.reply_to(message, "上传文件（xlsx/csv/pptx），我帮你转成图片！支持 xlsx/xls/xlsm/csv/pptx/pot/swf（swf 暂不支持）。")
+
+@bot.message_handler(commands=['test'])  # /test 命令：确认 Bot 活着
+def test_message(message):
+    bot.reply_to(message, "Bot 活着！Webhook 已设，可以测试转换了。")
 
 @bot.message_handler(content_types=['document'])
 def handle_document(message):
@@ -39,7 +43,7 @@ def handle_document(message):
                     bot.send_photo(message.chat.id, photo, caption=os.path.basename(img_path))
             bot.reply_to(message, f"转换完成！共 {len(images)} 张图片。")
         else:
-            bot.reply_to(message, "转换失败或不支持格式！支持：xlsx/xls/xlsm/csv/pptx/pot/swf")
+            bot.reply_to(message, "转换失败或不支持格式！支持：xlsx/xls/xlsm/csv/pptx/pot（swf 暂不支持）")
         
         # 清理：删除临时文件（无记录）
         if os.path.exists(temp_file_path):
@@ -65,9 +69,3 @@ if __name__ == "__main__":
     # 本地测试：python bot.py
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
-    
-    # 注意：部署后，手动设置 webhook（见上方 curl 命令）
-    # 示例（本地或一次性脚本）：
-    # webhook_url = 'https://your-service.onrender.com/webhook'
-    # bot.remove_webhook()  # 移除旧 polling
-    # bot.set_webhook(url=webhook_url)
