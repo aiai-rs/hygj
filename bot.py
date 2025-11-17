@@ -14,14 +14,17 @@ app = Flask(__name__)  # Flask app，用于 webhook
 
 @bot.message_handler(commands=['start'])
 def start_message(message):
+    print(f"[DEBUG] 收到 /start 命令")  # 加这行调试
     bot.reply_to(message, "上传文件（xlsx/csv/pptx），我帮你转成图片！支持 xlsx/xls/xlsm/csv/pptx/pot/swf（swf 暂不支持）。")
 
-@bot.message_handler(commands=['test'])  # /test 命令：确认 Bot 活着
+@bot.message_handler(commands=['test'])
 def test_message(message):
-    bot.reply_to(message, "Bot 活着！Webhook 已设，可以测试转换了。")
+    print(f"[DEBUG] 收到 /test 命令")  # 加这行调试
+    bot.reply_to(message, "Bot 活着！Webhook 已设，可以上传 xlsx 测试转换了。")
 
 @bot.message_handler(content_types=['document'])
 def handle_document(message):
+    print(f"[DEBUG] 收到文件上传: {message.document.file_name}")  # 加这行调试
     try:
         file_info = bot.get_file(message.document.file_id)
         downloaded_file = bot.download_file(file_info.file_path)
@@ -50,15 +53,17 @@ def handle_document(message):
             os.unlink(temp_file_path)
         
     except Exception as e:
+        print(f"Bot错误: {e}")  # 已有的
         bot.reply_to(message, f"错误: {str(e)}")
-        print(f"Bot错误: {e}")  # Render 日志输出
 
 # Webhook 端点：接收 Telegram 更新
 @app.route('/webhook', methods=['POST'])
 def webhook():
+    print("[DEBUG] 收到 webhook 更新")  # 加这行调试
     if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
         update = telebot.types.Update.de_json(json_string)
+        print(f"[DEBUG] 更新内容: {update}")  # 加这行，打印消息细节
         bot.process_new_updates([update])
         return ''
     else:
