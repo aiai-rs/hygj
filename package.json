@@ -5,11 +5,13 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js",
-    "postinstall": "npx puppeteer browsers install chrome"
+    "dev": "nodemon index.js"
   },
   "engines": {
     "node": "20.x"
+  },
+  "puppeteer": {
+    "cacheDirectory": "/tmp/puppeteer_cache"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
@@ -17,7 +19,7 @@
     "express": "^4.19.2",
     "xlsx": "^0.18.5",
     "pptxgenjs": "^3.12.0",
-    "puppeteer": "^22.6.1",
+    "puppeteer": "^23.5.0",
     "sharp": "^0.33.2",
     "fs-extra": "^11.2.0",
     "node-fetch": "^2.7.0"
