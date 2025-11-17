@@ -19,15 +19,32 @@ if (!BOT_TOKEN) {
 const bot = new Telegraf(BOT_TOKEN);
 const app = express();
 
-// 临时目录（修复：用相对路径，避免 __dirname 对象问题）
-const TEMP_DIR = './temp';
-if (typeof TEMP_DIR !== 'string') {
-  console.error('TEMP_DIR is not a string:', TEMP_DIR);
-  process.exit(1);
+// 临时目录（修复：用绝对 fallback，避免 __dirname 问题）
+let TEMP_DIR;
+try {
+  const safeDirname = typeof __dirname === 'string' ? __dirname : process.cwd();
+  console.log('Debug: safeDirname =', safeDirname);  // 日志1：检查 __dirname
+  TEMP_DIR = path.join(safeDirname, 'temp');
+  console.log('Debug: TEMP_DIR =', TEMP_DIR);  // 日志2：检查路径
+} catch (e) {
+  console.error('Debug: Path error, fallback to ./temp');
+  TEMP_DIR = './temp';
 }
-// 创建目录（用 Node 内置，递归）
-if (!fs.existsSync(TEMP_DIR)) {
-  fs.mkdirSync(TEMP_DIR, { recursive: true });
+if (typeof TEMP_DIR !== 'string' || TEMP_DIR === '[object Object]') {
+  console.error('Debug: TEMP_DIR invalid, force ./temp');
+  TEMP_DIR = './temp';
+}
+console.log('Final TEMP_DIR:', TEMP_DIR);  // 日志3：最终路径
+
+// 创建目录
+try {
+  if (!fs.existsSync(TEMP_DIR)) {
+    fs.mkdirSync(TEMP_DIR, { recursive: true });
+    console.log('Debug: Created TEMP_DIR');
+  }
+} catch (e) {
+  console.error('Debug: mkdir error:', e.message);
+  process.exit(1);
 }
 
 // 支持格式
@@ -48,11 +65,14 @@ bot.on('document', async (ctx) => {
   }
   ctx.reply('处理中...');
   try {
+    console.log('Debug: Starting file process, TEMP_DIR:', TEMP_DIR);  // 日志4
     // 下载文件
     const fileUrl = await ctx.telegram.getFileLink(file.file_id);
     const filePath = path.join(TEMP_DIR, `input${ext}`);
+    console.log('Debug: filePath =', filePath);  // 日志5
     const response = await fetch(fileUrl);
     await fs.promises.writeFile(filePath, Buffer.from(await response.arrayBuffer()));
+    console.log('Debug: File downloaded to', filePath);
 
     let images = [];
     if (['.xlsx', '.xls', '.xlsm', '.csv'].includes(ext)) {
@@ -167,12 +187,17 @@ async function launchPuppeteer() {
   });
 }
 
-// 清理（修复：用 Node 内置 rmdirSync + rmSync）
+// 清理
 function cleanupTemp() {
-  if (fs.existsSync(TEMP_DIR)) {
-    fs.rmSync(TEMP_DIR, { recursive: true, force: true });
+  try {
+    if (fs.existsSync(TEMP_DIR)) {
+      fs.rmSync(TEMP_DIR, { recursive: true, force: true });
+      console.log('Debug: Cleaned TEMP_DIR');  // 日志6
+    }
+    fs.mkdirSync(TEMP_DIR, { recursive: true });
+  } catch (e) {
+    console.error('Debug: Cleanup error:', e.message);
   }
-  fs.mkdirSync(TEMP_DIR, { recursive: true });
 }
 
 // Webhook 设置
