@@ -10,9 +10,6 @@
   "engines": {
     "node": "20.x"
   },
-  "puppeteer": {
-    "cacheDirectory": "/tmp/puppeteer_cache"
-  },
   "dependencies": {
     "dotenv": "^16.4.5",
     "telegraf": "^4.16.3",
