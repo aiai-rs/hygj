@@ -120,7 +120,7 @@ async function convertPptxToImages(filePath) {
 // SWF 转图片
 async function convertSwfToImages(filePath) {
   const images = [];
-  const browser = await launchPuppeteer(); // 用共享 launch 函数
+  const browser = await launchPuppeteer();
   const page = await browser.newPage();
   await page.setContent(`<div style="font-size:24px;padding:20px;">SWF 不支持（Flash 已弃用），请用其他格式。</div>`);
   const imgPath = path.join(TEMP_DIR, 'swf_frame.png');
@@ -130,7 +130,7 @@ async function convertSwfToImages(filePath) {
   return images;
 }
 
-// HTML 转图片（核心：配置 Puppeteer）
+// HTML 转图片
 async function renderHtmlToImage(html, outputPath) {
   const browser = await launchPuppeteer();
   const page = await browser.newPage();
@@ -144,12 +144,12 @@ async function renderHtmlToImage(html, outputPath) {
   fs.renameSync(tmpPath, outputPath);
 }
 
-// 共享 Puppeteer launch（Render 配置）
+// 共享 Puppeteer launch（优化：用环境路径）
 async function launchPuppeteer() {
   return puppeteer.launch({
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-accelerated-2d-canvas', '--no-first-run', '--no-zygote', '--disable-gpu'],
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(), // 动态路径
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(),
     pipe: true
   });
 }
