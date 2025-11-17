@@ -1,5 +1,6 @@
 require('dotenv').config();
 const { Telegraf } = require('telegraf');
+const express = require('express'); // 新加：HTTP 服务器
 const xlsx = require('xlsx');
 const PptxGenJS = require('pptxgenjs');
 const puppeteer = require('puppeteer');
@@ -10,11 +11,12 @@ const fetch = require('node-fetch');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 if (!BOT_TOKEN) {
-  console.error('BOT_TOKEN not set! Add to .env file.');
+  console.error('BOT_TOKEN not set! Add to .env or Render env.');
   process.exit(1);
 }
 
 const bot = new Telegraf(BOT_TOKEN);
+const app = express(); // 新加：Express app
 
 // 临时目录（处理后立即删除）
 const TEMP_DIR = path.join(__dirname, 'temp');
@@ -32,16 +34,13 @@ bot.on('text', (ctx) => {
 bot.on('document', async (ctx) => {
   const file = ctx.message.document;
   if (!file) return;
-
   const ext = path.extname(file.file_name).toLowerCase();
   if (!SUPPORTED_FORMATS.includes(ext)) {
     return ctx.reply('不支持的格式。只支持: xlsx, xls, xlsm, csv, pptx, pot, swf');
   }
-
   ctx.reply('处理中...'); // 进度提示
-
   try {
-    // 下载文件到 temp（已修复 fetch）
+    // 下载文件到 temp
     const fileUrl = await ctx.telegram.getFileLink(file.file_id);
     const filePath = path.join(TEMP_DIR, `input${ext}`);
     const response = await fetch(fileUrl);
@@ -59,21 +58,17 @@ bot.on('document', async (ctx) => {
     // 发送图片回 Telegram
     for (const imgPath of images) {
       await ctx.replyWithPhoto({ source: imgPath });
-      // 立即删除图片（零记录）
-      fs.unlinkSync(imgPath);
+      fs.unlinkSync(imgPath); // 立即删除
     }
 
     // 删除原文件
     fs.unlinkSync(filePath);
-
-    // 清空 temp 目录
+    // 清空 temp
     cleanupTemp();
-
     ctx.reply(`转换完成！发送了 ${images.length} 张图片。无任何保存。`);
   } catch (error) {
     console.error('Error:', error.message);
     ctx.reply('转换失败: ' + error.message);
-    // 出错也清理
     cleanupTemp();
   }
 });
@@ -89,7 +84,6 @@ async function convertSpreadsheetToImages(filePath) {
   } else {
     workbook = xlsx.readFile(filePath);
   }
-
   const images = [];
   for (const sheetName of workbook.SheetNames) {
     const ws = workbook.Sheets[sheetName];
@@ -120,7 +114,7 @@ function generateTableHtml(ws) {
 // PPTX 转图片（简化，每页一图）
 async function convertPptxToImages(filePath) {
   const images = [];
-  const browser = await puppeteer.launch({ headless: true });
+  const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
   const page = await browser.newPage();
   const text = 'PPTX预览（简化模式，每页转图）';
   await page.setContent(`<div style="font-size:24px;padding:20px;">${text}</div>`);
@@ -134,7 +128,7 @@ async function convertPptxToImages(filePath) {
 // SWF 转图片（第一帧）
 async function convertSwfToImages(filePath) {
   const images = [];
-  const browser = await puppeteer.launch({ headless: true });
+  const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
   const page = await browser.newPage();
   const html = `<html><body><embed src="file://${filePath}" type="application/x-shockwave-flash" width="800" height="600"></body></html>`;
   await page.setContent(html, { waitUntil: 'networkidle0' });
@@ -145,28 +139,41 @@ async function convertSwfToImages(filePath) {
   return images;
 }
 
-// HTML 渲染成图片（已修复 Sharp）
+// HTML 渲染成图片
 async function renderHtmlToImage(html, outputPath) {
-  const browser = await puppeteer.launch({ headless: true });
+  const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
   const page = await browser.newPage();
   await page.setContent(html);
   await page.screenshot({ path: outputPath, fullPage: true });
   await browser.close();
-  // Sharp 优化 PNG（用临时文件避免冲突）
+  // Sharp 优化 PNG
   const tmpPath = outputPath + '.tmp';
   await sharp(outputPath).png().toFile(tmpPath);
   fs.unlinkSync(outputPath);
   fs.renameSync(tmpPath, outputPath);
 }
 
-// 清理 temp（零记录）
+// 清理 temp
 function cleanupTemp() {
   fs.emptyDirSync(TEMP_DIR);
 }
 
-// 启动 Bot（polling，适合 Pella.app）
-bot.launch().then(() => {
-  console.log('Bot started! (Polling mode)');
+// Webhook 设置：Express 处理 /bot 路径
+const PORT = process.env.PORT || 3000;
+app.use(bot.webhookCallback('/bot'));
+app.listen(PORT, () => {
+  console.log(`Bot running on port ${PORT}`);
+});
+
+// 启动 webhook（设置 Telegram webhook URL）
+bot.launch({
+  webhook: {
+    domain: process.env.RENDER_EXTERNAL_HOSTNAME ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}.onrender.com` : 'http://localhost:3000',
+    port: PORT,
+    path: '/bot'
+  }
+}).then(() => {
+  console.log('Bot started with webhook!');
   cleanupTemp(); // 启动时清
 }).catch(err => {
   console.error('Bot error:', err);
@@ -174,7 +181,7 @@ bot.launch().then(() => {
   process.exit(1);
 });
 
-// 优雅关闭（清 temp）
+// 优雅关闭
 process.once('SIGINT', () => {
   bot.stop('SIGINT');
   cleanupTemp();
