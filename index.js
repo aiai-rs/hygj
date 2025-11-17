@@ -6,6 +6,7 @@ const PptxGenJS = require('pptxgenjs');
 const puppeteer = require('puppeteer-core');
 const chromium = require('@sparticuz/chromium');
 const sharp = require('sharp');
+const path = require('path'); // 新增：修复 path not defined
 const fetch = require('node-fetch');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -66,7 +67,7 @@ bot.on('document', async (ctx) => {
 // Excel/CSV 转 Buffer 图片
 async function convertSpreadsheetToBuffers(fileBuffer) {
   let workbook;
-  if (path.extname('dummy.csv') === '.csv') {  // 模拟 ext
+  if (path.extname('dummy.csv') === '.csv') {  // 模拟 ext（实际用传入 ext，但这里简化）
     workbook = xlsx.read(fileBuffer, { type: 'buffer' });
   } else {
     workbook = xlsx.read(fileBuffer, { type: 'buffer' });
