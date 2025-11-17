@@ -6,7 +6,7 @@ const PptxGenJS = require('pptxgenjs');
 const puppeteer = require('puppeteer-core');
 const chromium = require('@sparticuz/chromium');
 const sharp = require('sharp');
-const path = require('path'); // 新增：修复 path not defined
+const path = require('path'); // 修复：添加 path 模块
 const fetch = require('node-fetch');
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -43,7 +43,7 @@ bot.on('document', async (ctx) => {
 
     let imageBuffers = [];
     if (['.xlsx', '.xls', '.xlsm', '.csv'].includes(ext)) {
-      imageBuffers = await convertSpreadsheetToBuffers(fileBuffer);
+      imageBuffers = await convertSpreadsheetToBuffers(fileBuffer, ext);
     } else if (['.pptx', '.pot'].includes(ext)) {
       imageBuffers = await convertPptxToBuffers(fileBuffer);
     } else if (ext === '.swf') {
@@ -64,10 +64,10 @@ bot.on('document', async (ctx) => {
   }
 });
 
-// Excel/CSV 转 Buffer 图片
-async function convertSpreadsheetToBuffers(fileBuffer) {
+// Excel/CSV 转 Buffer 图片（修复：传入 ext 判断）
+async function convertSpreadsheetToBuffers(fileBuffer, ext) {
   let workbook;
-  if (path.extname('dummy.csv') === '.csv') {  // 模拟 ext（实际用传入 ext，但这里简化）
+  if (ext === '.csv') {
     workbook = xlsx.read(fileBuffer, { type: 'buffer' });
   } else {
     workbook = xlsx.read(fileBuffer, { type: 'buffer' });
