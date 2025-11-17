@@ -3,7 +3,8 @@ const { Telegraf } = require('telegraf');
 const express = require('express');
 const xlsx = require('xlsx');
 const PptxGenJS = require('pptxgenjs');
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core'); // 改：用 core
+const chromium = require('@sparticuz/chromium'); // 新增：Chromium 提供者
 const sharp = require('sharp');
 const fs = require('fs-extra');
 const path = require('path');
@@ -144,21 +145,17 @@ async function renderHtmlToImage(html, outputPath) {
   fs.renameSync(tmpPath, outputPath);
 }
 
-// 共享 Puppeteer launch（修复：自动检测路径，不硬编码）
+// 共享 Puppeteer launch（核心修复：用 @sparticuz/chromium 自动路径）
 async function launchPuppeteer() {
   return puppeteer.launch({
     headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-accelerated-2d-canvas',
-      '--no-first-run',
-      '--no-zygote',
-      '--disable-gpu',
-      '--single-process'  // 新增：Render 内存优化
-    ],
-    executablePath: undefined,  // 关键：让 Puppeteer 自动找（puppeteer.executablePath() 内部处理）
+    args: chromium.args,  // 新增：用 chromium 的优化 args
+    defaultViewport: chromium.defaultViewport,
+    executablePath: await chromium.executablePath({  // 关键：动态获取 Chromium 路径
+      args: chromium.args,
+      fallbackToSystem: true,
+      emulator: true  // Render 模拟环境
+    }),
     pipe: true
   });
 }
