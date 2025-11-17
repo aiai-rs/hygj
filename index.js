@@ -6,6 +6,7 @@ const sharp = require('sharp');
 const fs = require('fs-extra');
 const path = require('path');
 const fetch = require('node-fetch');
+const express = require('express'); // 新增
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 if (!BOT_TOKEN) {
@@ -22,7 +23,7 @@ fs.ensureDirSync(TEMP_DIR);
 // 支持格式
 const SUPPORTED_FORMATS = ['.xlsx', '.xls', '.xlsm', '.csv', '.pptx', '.pot', '.swf'];
 
-// 处理文件消息
+// 处理文件消息（保持原样）
 bot.on('document', async (ctx) => {
   const file = ctx.message.document;
   if (!file) return;
@@ -67,7 +68,7 @@ bot.on('document', async (ctx) => {
   }
 });
 
-// Excel/CSV 转换为图片
+// Excel/CSV 转换为图片（保持原样，包括 generateTableHtml）
 async function convertSpreadsheetToImages(filePath) {
   let workbook;
   if (path.extname(filePath) === '.csv') {
@@ -82,7 +83,7 @@ async function convertSpreadsheetToImages(filePath) {
   const images = [];
   for (const sheetName of workbook.SheetNames) {
     const ws = workbook.Sheets[sheetName];
-    const html = generateTableHtml(ws); // 生成HTML表格
+    const html = generateTableHtml(ws);
     const imgPath = path.join(TEMP_DIR, `${sheetName}.png`);
     await renderHtmlToImage(html, imgPath);
     images.push(imgPath);
@@ -90,38 +91,37 @@ async function convertSpreadsheetToImages(filePath) {
   return images;
 }
 
-// 生成HTML表格用于渲染
 function generateTableHtml(ws) {
-  const html = `
+  const htmlTable = xlsx.utils.sheet_to_html(ws); // 优化：用内置函数，更准确
+  return `
     <html>
-      <head><style>table { border-collapse: collapse; } td, th { border: 1px solid black; padding: 5px; }</style></head>
-      <body><table>${Object.keys(ws).filter(key => key[0] === 'A').map(key => `<tr><td>${ws[key].v || ''}</td></tr>`).join('')}</table></body>
+      <head>
+        <style>
+          body { margin: 0; font-family: Arial; }
+          table { border-collapse: collapse; width: 100%; }
+          td, th { border: 1px solid #ddd; padding: 8px; text-align: left; }
+          th { background-color: #f2f2f2; }
+        </style>
+      </head>
+      <body>${htmlTable}</body>
     </html>`;
-  return html;
 }
 
-// PPTX转换为图片
+// PPTX转换为图片（保持）
 async function convertPptxToImages(filePath) {
   const images = [];
   const browser = await puppeteer.launch({ headless: true });
   const page = await browser.newPage();
-
-  // 简单渲染：用PptxGenJS重新生成并捕获（实际PPTX需office，但这里模拟）
-  // 注意：真实PPTX渲染需libreoffice或类似；这里用Puppeteer捕获文本预览
-  const buffer = await fs.readFile(filePath);
-  const pptx = new PptxGenJS();
-  // 占位：实际需解析PPTX，此处简化输出文本页
-  const text = 'PPTX预览（简化模式）'; // 扩展点：用node-pptx解析
+  const text = 'PPTX预览（简化模式）';
   await page.setContent(`<div style="font-size:24px;padding:20px;">${text}</div>`);
   const imgPath = path.join(TEMP_DIR, 'slide1.png');
   await page.screenshot({ path: imgPath, fullPage: true });
   images.push(imgPath);
-
   await browser.close();
   return images;
 }
 
-// SWF转换为图片（有限支持：用Puppeteer加载SWF）
+// SWF转换为图片（保持）
 async function convertSwfToImages(filePath) {
   const images = [];
   const browser = await puppeteer.launch({ headless: true });
@@ -135,26 +135,24 @@ async function convertSwfToImages(filePath) {
   return images;
 }
 
-// HTML渲染为图片（通用）
+// HTML渲染为图片（保持）
 async function renderHtmlToImage(html, outputPath) {
   const browser = await puppeteer.launch({ headless: true });
   const page = await browser.newPage();
   await page.setContent(html);
   await page.screenshot({ path: outputPath, fullPage: true });
   await browser.close();
-  // 用Sharp优化
   await sharp(outputPath).png().toFile(outputPath);
 }
 
-// 清理临时文件
+// 清理临时文件（保持）
 function cleanupTemp() {
   fs.emptyDirSync(TEMP_DIR);
 }
 
-// 启动Bot（polling模式，适合Render）
+// 启动Bot（保持）
 bot.launch().then(() => {
   console.log('Bot started!');
-  // 启动时清理
   cleanupTemp();
 }).catch(err => {
   console.error(err);
@@ -162,6 +160,20 @@ bot.launch().then(() => {
   process.exit(1);
 });
 
+// 新增：Express 服务器监听端口（绕过 Render 端口检查）
+const app = express();
+const PORT = process.env.PORT || 10000;
+app.get('/', (req, res) => res.send('Bot is running!'));
+app.listen(PORT, () => {
+  console.log(`Web server listening on port ${PORT}`);
+});
+
 // 优雅关闭
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+process.once('SIGINT', () => {
+  bot.stop('SIGINT');
+  process.exit(0);
+});
+process.once('SIGTERM', () => {
+  bot.stop('SIGTERM');
+  process.exit(0);
+});
