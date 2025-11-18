@@ -1,13 +1,16 @@
 {
   "name": "xlsx-txt-to-image-bot",
   "version": "1.0.0",
-  "main": "main.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node main.js"
+    "start": "node index.js"
   },
   "dependencies": {
     "grammy": "^1.30.0",
     "puppeteer": "^23.5.0",
     "exceljs": "^4.4.0"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }
