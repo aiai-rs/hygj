@@ -2,31 +2,30 @@ const { Bot } = require("grammy");
 const fs = require("fs");
 const path = require("path");
 const puppeteer = require("puppeteer");
-const ExcelJS = require("exceljs");
 
 const TOKEN = process.env.BOT_TOKEN;
 if (!TOKEN) {
-    console.error("请在环境变量中设置 BOT_TOKEN！");
+    console.error("错误：请在 Render 环境变量中设置 BOT_TOKEN");
     process.exit(1);
 }
 
 const bot = new Bot(TOKEN);
-
-// 全局复用浏览器，节省内存和启动时间
 let browser;
+
 async function getBrowser() {
     if (!browser) {
         browser = await puppeteer.launch({
+            product: "chrome",
             headless: "new",
             args: [
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
+                "--no-zygote",
                 "--single-process",
-                "--no-zygote"
-            ],
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined
+                "--disable-extensions"
+            ]
         });
     }
     return browser;
@@ -34,27 +33,18 @@ async function getBrowser() {
 
 // Excel → 图片
 async function excelToImage(filePath) {
+    const ExcelJS = require("exceljs");
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(filePath);
-    const worksheet = workbook.worksheets[0];
+    const ws = workbook.worksheets[0];
 
-    let html = `
-    <style>
-        table { border-collapse: collapse; font-family: Arial, sans-serif; font-size: 14px; }
-        td, th { border: 1px solid #333; padding: 8px 12px; text-align: center; }
-        th { background: #f0f0f0; }
-    </style>
-    <table>`;
-
-    worksheet.eachRow((row, rowNumber) => {
+    let html = `<table border="1" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:15px;">`;
+    ws.eachRow((row, rn) => {
         html += "<tr>";
         row.eachCell({ includeEmpty: true }, (cell) => {
-            const value = cell.value || "";
-            if (rowNumber === 1) {
-                html += `<th>${value}</th>`;
-            } else {
-                html += `<td>${value}</td>`;
-            }
+            const val = cell.value ?? "";
+            if (rn === 1) html += `<th style="background:#f0f0f0;padding:8px">${val}</th>`;
+            else html += `<td style="padding:8px;text-align:center">${val}</td>`;
         });
         html += "</tr>";
     });
@@ -62,107 +52,94 @@ async function excelToImage(filePath) {
 
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "networkidle0" });
-    const body = await page.$("body");
-    const bounding = await body.boundingBox();
-
-    const screenshot = await page.screenshot({
-        clip: {
-            x: bounding.x,
-            y: bounding.y,
-            width: bounding.width + 40,
-            height: bounding.height + 40
-        }
-    });
+    const imgBuffer = await page.screenshot({ fullPage: true });
     await page.close();
 
-    const outPath = filePath.replace(/\.(xlsx|xls)$/i, ".png");
-    fs.writeFileSync(outPath, screenshot);
-    return outPath;
+    const out = filePath.replace(/\.(xlsx|xls)$/i, ".png");
+    fs.writeFileSync(out, imgBuffer);
+    return out;
 }
 
 // TXT → 图片
 async function txtToImage(filePath) {
-    const content = fs.readFileSync(filePath, "utf-8");
-    const escaped = content
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;");
+    const text = fs.readFileSync(filePath, "utf-8")
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
     const html = `
-    <!DOCTYPE html>
-    <html>
-    <body style="margin:30px; background:white;">
-    <pre style="font-family:'Courier New',monospace; font-size:16px; line-height:1.5;">${escaped}</pre>
-    </body>
-    </html>`;
+    <!DOCTYPE html><html><body style="margin:30px;background:white;">
+    <pre style="font-family:'Courier New',monospace;font-size:16px;line-height:1.5;">${text}</pre>
+    </body></html>`;
 
     const page = await browser.newPage();
     await page.setContent(html);
-    await page.setViewport({ width: 1200, height: 800 });
-
     const pre = await page.$("pre");
     const box = await pre.boundingBox();
 
-    const screenshot = await page.screenshot({
+    const imgBuffer = await page.screenshot({
         clip: {
-            x: box.x - 20,
-            y: box.y - 20,
-            width: box.width + 40,
-            height: box.height + 40
+            x: box.x - 30,
+            y: box.y - 30,
+            width: box.width + 60,
+            height: box.height + 60
         }
     });
     await page.close();
 
-    const outPath = filePath.replace(/\.txt$/i, ".png");
-    fs.writeFileSync(outPath, screenshot);
-    return outPath;
+    const out = filePath.replace(/\.txt$/i, ".png");
+    fs.writeFileSync(out, imgBuffer);
+    return out;
 }
 
-// ========== Bot 逻辑 ==========
-bot.command("start", (ctx) =>
-    ctx.reply("把 .xlsx 或 .txt 文件发给我，我会立刻转成高清图片发回给你～\n支持超大表格和长文本！")
-);
+// Bot 主逻辑
+bot.command("start", (ctx) => ctx.reply(
+    "发 .xlsx、.xls 或 .txt 文件给我，我马上转成高清图片发回给你！\n支持超大表格和长文本～"
+));
 
 bot.on("message:document", async (ctx) => {
     const file = ctx.message.document;
-    const fileName = file.file_name.toLowerCase();
+    const name = file.file_name.toLowerCase();
 
-    if (!fileName.endsWith(".xlsx") && !fileName.endsWith(".xls") && !fileName.endsWith(".txt")) {
-        return ctx.reply("请上传 .xlsx、.xls 或 .txt 文件哦～");
+    if (!name.endsWith(".xlsx") && !name.endsWith(".xls") && !name.endsWith(".txt")) {
+        return ctx.reply("只支持 .xlsx、.xls 和 .txt 文件哦～");
     }
 
-    await ctx.reply("收到！正在转换，请稍等 5-20 秒...");
+    await ctx.reply("正在转换，请稍等 5-20 秒...");
 
     try {
-        const browserInstance = await getBrowser();
-        const fileLink = await ctx.getFile().then(f => f.getUrl());
+        await getBrowser(); // 确保浏览器已启动
+
+        const url = await ctx.getFile().then(f => f.getUrl());
         const localPath = path.join("/tmp", file.file_name);
 
         // 下载文件
-        const response = await fetch(fileLink);
-        const buffer = await response.arrayBuffer();
-        fs.writeFileSync(localPath, Buffer.from(buffer));
+        const res = await fetch(url);
+        const buffer = Buffer.from(await res.arrayBuffer());
+        fs.writeFileSync(localPath, buffer);
 
         let imgPath;
-        if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
+        if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
             imgPath = await excelToImage(localPath);
         } else {
             imgPath = await txtToImage(localPath);
         }
 
-        await ctx.replyWithPhoto({ source: imgPath }, { caption: `已转换：${file.file_name}` });
+        await ctx.replyWithPhoto(
+            { source: fs.readFileSync(imgPath) },
+            { caption: `转换完成：${file.file_name}` }
+        );
 
-        // 清理临时文件
+        // 立即删除所有临时文件（零残留）
         [localPath, imgPath].forEach(p => fs.existsSync(p) && fs.unlinkSync(p));
 
-    } catch (err) {
-        console.error(err);
-        await ctx.reply("转换失败了：\n" + err.message);
+    } catch (e) {
+        console.error(e);
+        await ctx.reply("转换失败了：\n" + e.message);
     }
 });
 
+// 启动
 (async () => {
-    await getBrowser(); // 提前启动浏览器
+    await getBrowser();
     console.log("Bot 已启动，等待文件...");
-    await bot.start();
+    bot.start();
 })();
