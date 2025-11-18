@@ -1,3 +1,4 @@
-node_modules
-/tmp
+node_modules/
 *.png
+/tmp/
+.env
