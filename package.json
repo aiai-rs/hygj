@@ -1,13 +1,17 @@
 {
   "name": "xlsx-txt-to-image-bot",
   "version": "1.0.0",
+  "description": "Telegram bot that converts xlsx and txt to images",
   "main": "main.js",
   "scripts": {
     "start": "node main.js"
   },
   "dependencies": {
-    "grammatical-telegram-bot": "^1.0.0",
-    "puppeteer": "^23.0.0",
+    "grammy": "^1.30.0",
+    "puppeteer": "^23.5.0",
     "exceljs": "^4.4.0"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }
