@@ -1,15 +1,7 @@
 #!/usr/bin/env bash
-set -o errexit
+set -e
 
-# 先正常安装依赖 + 下载Chrome
 npm install
-npx puppeteer browsers install chrome
 
-# 关键：把下载的Chrome复制到Render运行时能访问的路径
-PUPPETEER_CACHE_DIR="/opt/render/.cache/puppeteer"
-
-if [[ ! -d $PUPPETEER_CACHE_DIR ]]; then
-  echo "首次复制Chrome到缓存..."
-  mkdir -p $PUPPETEER_CACHE_DIR
-  cp -R ~/.cache/puppeteer/* $PUPPETEER_CACHE_DIR/
-fi
+# 强制下载 Chrome 到 Render 能访问的路径
+npx puppeteer browsers install chrome --with-deps
