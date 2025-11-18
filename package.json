@@ -9,8 +9,5 @@
     "grammy": "^1.30.0",
     "puppeteer": "^23.5.0",
     "exceljs": "^4.4.0"
-  },
-  "engines": {
-    "node": ">=18"
   }
 }
