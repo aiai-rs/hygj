@@ -1,169 +1,131 @@
-require('dotenv').config();
-const { Telegraf } = require('telegraf');
-const express = require('express');
-const xlsx = require('xlsx');
-const puppeteer = require('puppeteer-core');
-const chromium = require('@sparticuz/chromium');
+const TelegramBot = require('grammatical-telegram-bot'); // 轻量快捷
+const fs = require('fs');
 const path = require('path');
-const fetch = require('node-fetch');
+const { execSync } = require('child_process');
 
-const BOT_TOKEN = process.env.BOT_TOKEN;
-if (!BOT_TOKEN) {
-  console.error('BOT_TOKEN not set! Add to .env or Render env.');
-  process.exit(1);
+// 这两个库是核心（用 puppeteer 无头浏览器渲染表格和文本）
+const puppeteer = require('puppeteer');
+const exceljs = require('exceljs'); // 读取 xlsx
+const { fileURLToPath } = require('url');
+
+const TOKEN = process.env.BOT_TOKEN || '你的TOKEN放这里';
+
+const bot = new TelegramBot(TOKEN, { polling: true });
+
+let browser; // 全局复用浏览器实例，省内存
+
+async function launchBrowser() {
+    if (!browser) {
+        browser = await puppeteer.launch({
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage']
+        });
+    }
+    return browser;
 }
 
-const bot = new Telegraf(BOT_TOKEN);
-const app = express();
+// ========= Excel → 图片 =========
+async function excelToImage(filePath) {
+    const workbook = new exceljs.Workbook();
+    await workbook.xlsx.readFile(filePath);
+    const worksheet = workbook.worksheets[0]; // 只取第一个 sheet
 
-// 支持格式
-const SUPPORTED_FORMATS = ['.xlsx', '.xls', '.xlsm', '.csv', '.pptx', '.pot', '.swf'];
+    let html = `<table border="1" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:14px;">`;
+    worksheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
+        html += '<tr>';
+        row.eachCell({ includeEmpty: true }, (cell) => {
+            html += `<td style="padding:8px;min-width:80px;text-align:center;">${cell.value ?? ''}</td>`;
+        });
+        html += '</tr>';
+    });
+    html += '</table>';
 
-// 在线确认
-bot.on('text', (ctx) => {
-  ctx.reply('Bot 在线！请发送 xlsx, xls, xlsm, csv, pptx, pot, swf 文件转换图片。');
-});
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: 'networkidle0' });
+    await page.setViewport({ width: 1920, height: 1080 });
 
-// 处理文件消息（全内存）
-bot.on('document', async (ctx) => {
-  const file = ctx.message.document;
-  if (!file) return;
-  const ext = path.extname(file.file_name).toLowerCase();
-  console.log('Debug: Processing file ext:', ext);
-  if (!SUPPORTED_FORMATS.includes(ext)) {
-    return ctx.reply('不支持的格式。只支持: xlsx, xls, xlsm, csv, pptx, pot, swf');
-  }
-  ctx.reply('处理中...');
-  try {
-    // 下载到 Buffer
-    const fileUrl = await ctx.telegram.getFileLink(file.file_id);
-    const response = await fetch(fileUrl);
-    const fileBuffer = Buffer.from(await response.arrayBuffer());
-    console.log('Debug: File buffer size:', fileBuffer.length);
+    const imgBuffer = await page.screenshot({ fullPage: true });
+    await page.close();
+    const outPath = filePath.replace(/\.(xlsx|xls)$/i, '.png');
+    fs.writeFileSync(outPath, imgBuffer);
+    return outPath;
+}
 
-    let imageBuffers = [];
-    if (['.xlsx', '.xls', '.xlsm', '.csv'].includes(ext)) {
-      imageBuffers = await convertSpreadsheetToBuffers(fileBuffer);
-    } else if (['.pptx', '.pot'].includes(ext)) {
-      imageBuffers = await convertPptxToBuffers();
-    } else if (ext === '.swf') {
-      imageBuffers = await convertSwfToBuffers();
+// ========= TXT → 图片 =========
+async function txtToImage(filePath) {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const escaped = content.replace(/`/g, '\\`');
+
+    const html = `
+    <!DOCTYPE html>
+    <html><body>
+    <pre style="font-family: 'Courier New', monospace; font-size: 16px; line-height: 1.4; margin:20px;">
+    ${escaped}
+    </pre>
+    </body></html>`;
+
+    const page = await browser.newPage();
+    await page.setContent(html);
+    const pre = await page.$('pre');
+    const bounding = await pre.boundingBox();
+
+    const imgBuffer = await page.screenshot({
+        clip: {
+            x: bounding.x - 20,
+            y: bounding.y - 20,
+            width: bounding.width + 40,
+            height: bounding.height + 40
+        },
+        omitBackground: true
+    });
+    await page.close();
+
+    const outPath = filePath.replace(/\.txt$/i, '.png');
+    fs.writeFileSync(outPath, imgBuffer);
+    return outPath;
+}
+
+// ========= Bot 逻辑 =========
+bot.on('document', async (msg) => {
+    const fileName = msg.document.file_name.toLowerCase();
+    if (!fileName.endsWith('.xlsx') && !fileName.endsWith('.xls') && !fileName.endsWith('.txt')) {
+        return bot.sendMessage(msg.chat.id, '请上传 .xlsx 或 .txt 文件哦～');
     }
 
-    console.log('Debug: Generated', imageBuffers.length, 'images');
+    await bot.sendMessage(msg.chat.id, '收到！正在转换，请稍等 5-15 秒...');
 
-    // 发送 Buffer 图片
-    for (const imgBuffer of imageBuffers) {
-      await ctx.replyWithPhoto({
-        source: imgBuffer,
-        filename: `converted${Date.now()}.png`
-      });
+    try {
+        const file = await bot.getFile(msg.document.file_id);
+        const fileUrl = `https://api.telegram.org/file/bot${TOKEN}/${file.file_path}`;
+        const localPath = path.join('/tmp', msg.document.file_name);
+        const response = await fetch(fileUrl);
+        await require('stream').pipeline(response.body, fs.createWriteStream(localPath));
+
+        let imgPath;
+        if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+            imgPath = await excelToImage(localPath);
+        } else if (fileName.endsWith('.txt')) {
+            imgPath = await txtToImage(localPath);
+        }
+
+        await bot.sendPhoto(msg.chat.id, fs.readFileSync(imgPath), {
+            caption: `已转换：${msg.document.file_name}`
+        });
+
+        // 清理
+        fs.unlinkSync(localPath);
+        fs.unlinkSync(imgPath);
+    } catch (err) {
+        console.error(err);
+        bot.sendMessage(msg.chat.id, '转换失败了：' + err.message);
     }
-    ctx.reply(`转换完成！发送了 ${imageBuffers.length} 张图片。无任何保存。`);
-  } catch (error) {
-    console.error('Error:', error.message);
-    ctx.reply('转换失败: ' + error.message);
-  }
 });
 
-// Excel/CSV 转 Buffer 图片
-async function convertSpreadsheetToBuffers(fileBuffer) {
-  console.log('Debug: Converting spreadsheet');
-  let workbook = xlsx.read(fileBuffer, { type: 'buffer' });
-  const imageBuffers = [];
-  for (const sheetName of workbook.SheetNames) {
-    const ws = workbook.Sheets[sheetName];
-    const html = generateTableHtml(ws);
-    const imgBuffer = await renderHtmlToBuffer(html);
-    imageBuffers.push(imgBuffer);
-  }
-  return imageBuffers;
-}
-
-function generateTableHtml(ws) {
-  const htmlTable = xlsx.utils.sheet_to_html(ws);
-  return `
-    <html>
-      <head>
-        <style>
-          body { margin: 0; font-family: Arial; }
-          table { border-collapse: collapse; width: 100%; }
-          td, th { border: 1px solid #ddd; padding: 8px; text-align: left; }
-          th { background-color: #f2f2f2; }
-        </style>
-      </head>
-      <body>${htmlTable}</body>
-    </html>`;
-}
-
-// PPTX 转 Buffer（简化，用 Puppeteer 渲染文本）
-async function convertPptxToBuffers() {
-  console.log('Debug: Converting PPTX (simplified)');
-  const html = `<html><body style="font-size:24px;padding:20px;">PPTX 内容预览（简化模式）</body></html>`;
-  const imgBuffer = await renderHtmlToBuffer(html);
-  return [imgBuffer];
-}
-
-// SWF 转 Buffer（提示，用 Puppeteer 渲染）
-async function convertSwfToBuffers() {
-  console.log('Debug: Converting SWF (prompt)');
-  const html = `<html><body style="font-size:24px;padding:20px;">SWF 不支持（Flash 已弃用），请用其他格式。</body></html>`;
-  const imgBuffer = await renderHtmlToBuffer(html);
-  return [imgBuffer];
-}
-
-// HTML 转 Buffer（Puppeteer 截图 + Buffer 转换，无 Sharp）
-async function renderHtmlToBuffer(html) {
-  console.log('Debug: Rendering HTML to buffer');
-  const browser = await launchPuppeteer();
-  const page = await browser.newPage();
-  await page.setContent(html, { waitUntil: 'networkidle0' });
-  const screenshotBinary = await page.screenshot({ encoding: 'binary', fullPage: true });
-  await browser.close();
-  // 直接转 Buffer（PNG 默认）
-  return Buffer.from(screenshotBinary, 'binary');
-}
-
-// Puppeteer launch
-async function launchPuppeteer() {
-  return puppeteer.launch({
-    headless: true,
-    args: chromium.args,
-    defaultViewport: chromium.defaultViewport,
-    executablePath: await chromium.executablePath({
-      args: chromium.args,
-      fallbackToSystem: true,
-      emulator: true
-    }),
-    pipe: true
-  });
-}
-
-// Webhook 设置
-const PORT = process.env.PORT || 3000;
-app.use(express.json());
-app.use(bot.webhookCallback('/bot'));
-
-app.listen(PORT, async () => {
-  console.log(`Bot running on port ${PORT}`);
-  const webhookUrl = process.env.RENDER_EXTERNAL_HOSTNAME 
-    ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}/bot` 
-    : `http://localhost:${PORT}/bot`;
-  try {
-    await bot.telegram.setWebhook(webhookUrl);
-    console.log(`Webhook set to: ${webhookUrl}`);
-  } catch (err) {
-    console.error('Failed to set webhook:', err.message);
-    process.exit(1);
-  }
+bot.onText(/\/start/, (msg) => {
+    bot.sendMessage(msg.chat.id, '把 .xlsx 或 .txt 文件发给我，我会帮你转成高清图片～\n支持超大表格和长文本！');
 });
 
-// 优雅关闭
-process.once('SIGINT', () => {
-  bot.stop('SIGINT');
-  process.exit(0);
-});
-process.once('SIGTERM', () => {
-  bot.stop('SIGTERM');
-  process.exit(0);
-});
+(async () => {
+    await launchBrowser();
+    console.log('Node.js 版文件转图片 Bot 已启动');
+})();
