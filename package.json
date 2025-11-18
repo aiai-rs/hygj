@@ -1,34 +1,13 @@
 {
-  "name": "telegram-file-converter-bot",
+  "name": "xlsx-txt-to-image-bot",
   "version": "1.0.0",
-  "description": "A Telegram bot that converts Excel, CSV, PPTX, and other files to images.",
-  "main": "index.js",
+  "main": "main.js",
   "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js"
-  },
-  "engines": {
-    "node": "20.x"
+    "start": "node main.js"
   },
   "dependencies": {
-    "dotenv": "^16.4.5",
-    "telegraf": "^4.16.3",
-    "express": "^4.19.2",
-    "xlsx": "^0.18.5",
-    "puppeteer-core": "^23.5.0",
-    "@sparticuz/chromium": "^131.0.0",
-    "node-fetch": "^2.7.0"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.2"
-  },
-  "keywords": [
-    "telegram",
-    "bot",
-    "file-converter",
-    "excel-to-image",
-    "pptx-to-image"
-  ],
-  "author": "Your Name",
-  "license": "MIT"
+    "grammatical-telegram-bot": "^1.0.0",
+    "puppeteer": "^23.0.0",
+    "exceljs": "^4.4.0"
+  }
 }
